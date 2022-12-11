@@ -1,8 +1,21 @@
+/**  @file cli.c
+*    @brief implementation of methods for client part.
+*    
+*    
+*    Completing date: 10.12.2022
+*    
+*
+*    @author Nikitchyn Nazarii
+*/
+
+
+
 
 #include "cli.h"
 
 int sock; 
-char * cli_id;
+char * cli_id;			
+char client_name[20];
 
 volatile sig_atomic_t flag = 0;
 
@@ -11,16 +24,16 @@ void catch_ctrl_c_and_exit(int sig){
 }
 
 
-void * writeToServer(void *arg){
+void * writeToServer(void *arg ){
+
+    InputOutput * args = arg; 
 
     int nbytes;
     char buf[BUFLEN];
 
     while(1){
-        fprintf(stdout, "");
-        while (fgets(buf, BUFLEN, stdin)==nullptr){
-            printf("Empty string. Try again!\n\t > ");
-        }
+        fprintf(args->outstream, "Enter message starting with 'user_name | '");
+        fscanf(args->instream, "%s", buf );
         buf[strlen(buf)-1] = 0;
 
         nbytes = write(sock, buf, strlen(buf)+1);
@@ -34,6 +47,7 @@ void * writeToServer(void *arg){
 
 void * readFromServer (void *arg) {
 
+    InputOutput * args = arg; 
     int nbytes;
     char buf[BUFLEN];
 
@@ -43,17 +57,20 @@ void * readFromServer (void *arg) {
             perror("Read error\n");
             break;
         }else if (nbytes == 0) {
-            fprintf(stderr, "Server no message\n");   
+            fprintf(args->outstream, "\nServer no message\n");   
             break;
         }
         else {
-            printf("\n[server] %s\n", buf);
+            fprintf(args->outstream, "\n[server] %s\n", buf);
         }
     }
 }
 
-int main(){
+void cli(FILE * instream, FILE * outstream){
     signal(SIGINT, catch_ctrl_c_and_exit);
+
+    fprintf(stdout, "Enter your nickname: ");
+    fscanf(instream, "%s", client_name);
 
 
     int err;
@@ -65,6 +82,8 @@ int main(){
         exit (EXIT_FAILURE);
     }
 
+    
+    // Створення сокета
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(SERVER_PORT);
     server_addr.sin_addr = *(struct in_addr*) hostinfo->h_addr;
@@ -76,31 +95,33 @@ int main(){
     }
 
 
-    sock = socket(PF_INET, SOCK_STREAM, 0);
-    if ( sock<0 ){
-        perror("Client: socket was not created");
-        exit (EXIT_FAILURE);
-    }
-
-
+    // Під'єднання до сервера 
     err = connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr));
     if ( err < 0 ) {
         perror("Client: connect failure");
         exit(EXIT_FAILURE);
     }
-    fprintf(stdout, "Connection is ready\n");
-
-
+    fprintf(outstream, "Connection is ready\n");
+    
+    // Передача ідентифікатора клієнта
+    write(sock, client_name, strlen(client_name)+1);
+	
+    //заповнення структури для різних можливостей вводу виводу
+    InputOutput *args = malloc(sizeof *args);
+    args->instream = instream; 
+    args->outstream = outstream; 
+	
+    //створення нових потоків 
     pthread_t write_to_server;
 
-    if (pthread_create(&write_to_server, NULL, &writeToServer, NULL) != 0) {
+    if (pthread_create(&write_to_server, NULL, &writeToServer, args) != 0) {
         perror("Create pthread error!\n");
         exit(EXIT_FAILURE);
     }
 
     pthread_t read_from_server;
 
-    if (pthread_create(&read_from_server, NULL, &readFromServer, NULL) != 0) {
+    if (pthread_create(&read_from_server, NULL, &readFromServer, args) != 0) {
         perror("Create pthread error!\n");
         exit(EXIT_FAILURE);
     }
@@ -108,13 +129,11 @@ int main(){
     while(1){
         if (flag) break;
     }
-    fprintf(stdout, "The end\n");
+    fprintf(outstream, "The end\n");
 
     close(sock);
     exit (EXIT_SUCCESS);
 
-
-    return 0;
 }
 
 
